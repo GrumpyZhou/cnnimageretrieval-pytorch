@@ -7,6 +7,7 @@ import pickle
 import numpy as np
 
 import torch
+from torch.utils.model_zoo import load_url
 from torch.autograd import Variable
 from torchvision import transforms
 
@@ -29,7 +30,7 @@ whitening_names = ['retrieval-SfM-30k', 'retrieval-SfM-120k']
 
 parser = argparse.ArgumentParser(description='PyTorch CNN Image Retrieval Testing')
 
-# network
+# Network
 group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument('--network-path', '-npath', metavar='NETWORK',
                     help='network path, destination where network is saved')
@@ -37,13 +38,19 @@ group.add_argument('--network-offtheshelf', '-noff', metavar='NETWORK',
                     help='network off-the-shelf, in the format ARCHITECTURE-POOLING or ARCHITECTURE-POOLING-whiten,' + 
                     ' examples: resnet101-gem | resnet101-gem-whiten')
 
-# test options
+# Datset options
 parser.add_argument('--data_root', '-dir', metavar='DATA_ROOT', required=True,
                    help='path to the root folder of your datasets')
-                   
 parser.add_argument('--dataset', '-ds', metavar='DATASETS', default='cambridge', choices=datasets_names,
                    help='name of datasets (default: cambridge)')
+parser.add_argument('--train_txt', '-txt', metavar='TRAIN_TXT', default='dataset_train.txt', 
+                    help='file to load train images')
+parser.add_argument('--query_txt', '-qtxt', metavar='QUERY_TXT', default='dataset_test.txt', choices=datasets_names,
+                   help='file to load query images')
+parser.add_argument('--outfile', '-f', metavar='OUTFILE', default='cambridge.npy',
+                   help='name of the output file where retrieval results are stored')
 
+# Testing options
 parser.add_argument('--image-size', '-imsize', default=None, type=int, metavar='N',
                     help='maximum size of longer image side used for testing (default: None)')
 parser.add_argument('--multiscale', '-ms', dest='multiscale', action='store_true',
@@ -70,6 +77,21 @@ def get_imlist(data_root, dataset, ftxt):
     print('Load images from: {}, total num: {}'.format(fpath, len(ims)))
     return ims
     
+def cal_ranks(vecs, qvecs, Lw):
+    # search, rank, and print
+    scores = np.dot(vecs.T, qvecs)
+    ranks = np.argsort(-scores, axis=0)       
+
+    if Lw is not None:
+        # whiten the vectors
+        vecs_lw  = whitenapply(vecs, Lw['m'], Lw['P'])
+        qvecs_lw = whitenapply(qvecs, Lw['m'], Lw['P'])
+
+        # search, rank, and print
+        scores = np.dot(vecs_lw.T, qvecs_lw)
+        ranks = np.argsort(-scores, axis=0)
+    return scores, ranks
+
 def main():
     args = parser.parse_args()
     # setting up the visible GPU
@@ -177,47 +199,35 @@ def main():
     result_dict = {}
     for dataset in datasets: 
         start = time.time()
-
+        result_dict[dataset]= {}
         print('>> {}: Extracting...'.format(dataset))
-
+        
         # prepare config structure for the test dataset
-        images = get_imlist(data_root, dataset, 'dataset_train.txt')
-        qimages = get_imlist(data_root, dataset, 'dataset_test.txt')
+        images = get_imlist(data_root, dataset, args.train_txt)
+        qimages = get_imlist(data_root, dataset, args.query_txt)
         
         # extract database and query vectors
         print('>> {}: database images...'.format(dataset))
         vecs = extract_vectors(net, images, args.image_size, transform, root=os.path.join(data_root, dataset), ms=ms, msp=msp)
         print('>> {}: query images...'.format(dataset))
         qvecs = extract_vectors(net, qimages, args.image_size, transform, root=os.path.join(data_root, dataset), ms=ms, msp=msp)
-        
         print('>> {}: Evaluating...'.format(dataset))
 
         # convert to numpy
         vecs = vecs.numpy()
         qvecs = qvecs.numpy()
-
-        # search, rank, and print
-        scores = np.dot(vecs.T, qvecs)
-        ranks = np.argsort(-scores, axis=0)       
-    
-        if Lw is not None:
-            # whiten the vectors
-            vecs_lw  = whitenapply(vecs, Lw['m'], Lw['P'])
-            qvecs_lw = whitenapply(qvecs, Lw['m'], Lw['P'])
-
-            # search, rank, and print
-            scores = np.dot(vecs_lw.T, qvecs_lw)
-            ranks = np.argsort(-scores, axis=0)        
+        scores, ranks = cal_ranks(vecs, vecs, Lw)
+        result_dict[dataset]['train'] = {'scores':scores, 'ranks':ranks}
+        scores, ranks = cal_ranks(vecs, qvecs, Lw)        
+        result_dict[dataset]['test']  = {'scores':scores, 'ranks':ranks}
         print('>> {}: elapsed time: {}'.format(dataset, htime(time.time()-start)))
-        
-        result_dict[dataset]= {'scores':scores, 'ranks':ranks}
 
     # Save retrieval results
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
-    result_file = os.path.join(result_dir, '{}.npy'.format(args.dataset))
+    result_file = os.path.join(result_dir, outfile)
     np.save(result_file, result_dict)
-    print('Save retrieval results to {}'.format(result_dir))
+    print('Save retrieval results to {}'.format(result_file))
 
 if __name__ == '__main__':
     main()
