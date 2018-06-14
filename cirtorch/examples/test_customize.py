@@ -16,6 +16,11 @@ from cirtorch.utils.whiten import whitenlearn, whitenapply
 from cirtorch.utils.evaluate import compute_map_and_print
 from cirtorch.utils.general import get_data_root, htime
 
+PRETRAINED = {
+    'retrievalSfM120k-vgg16-gem'        : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/networks/retrieval-SfM-120k/retrievalSfM120k-vgg16-gem-b4dcdc6.pth',
+    'retrievalSfM120k-resnet101-gem'    : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/networks/retrieval-SfM-120k/retrievalSfM120k-resnet101-gem-b80fb85.pth',
+}
+
 datasets_names = {'tumlsi': ['.'], 
                   'cambridge':['ShopFacade', 'KingsCollege', 'StMarysChurch', 'OldHospital'], 
                   '7scenes':['heads', 'chess', 'fire', 'office', 'pumpkin', 'redkitchen', 'stairs']
@@ -69,19 +74,31 @@ def main():
     args = parser.parse_args()
     # setting up the visible GPU
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
-
+    
     # loading network from path
+    result_dir = 'retreival_results'
     if args.network_path is not None:
+        result_dir = os.path.join(result_dir, args.network_path)
         print(">> Loading network:\n>>>> '{}'".format(args.network_path))
-        state = torch.load(args.network_path)
+        if args.network_path in PRETRAINED:
+            # pretrained networks (downloaded automatically)
+            state = load_url(PRETRAINED[args.network_path], model_dir=os.path.join(get_data_root(), 'networks'))
+        else:
+            state = torch.load(args.network_path)
         net = init_network(model=state['meta']['architecture'], pooling=state['meta']['pooling'], whitening=state['meta']['whitening'], 
                             mean=state['meta']['mean'], std=state['meta']['std'], pretrained=False)
         net.load_state_dict(state['state_dict'])
+        
+        # if whitening is precomputed
+        if 'Lw' in state['meta']:
+            net.meta['Lw'] = state['meta']['Lw']
+        
         print(">>>> loaded network: ")
         print(net.meta_repr())
 
     # loading offtheshelf network
     elif args.network_offtheshelf is not None:
+        result_dir = os.path.join(result_dir, args.network_offtheshelf)        
         offtheshelf = args.network_offtheshelf.split('-')
         if len(offtheshelf)==3:
             if offtheshelf[2]=='whiten':
@@ -106,8 +123,8 @@ def main():
     # moving network to gpu and eval mode
     net.cuda()
     net.eval()
+    
     # set up the transform
-    # TODO: change to our datasets?
     normalize = transforms.Normalize(
         mean=net.meta['mean'],
         std=net.meta['std']
@@ -118,29 +135,37 @@ def main():
     ])
 
     # compute whitening
-    # TODO: either down load retrieval datasets or change the code to calculate on own datasets
     if args.whitening is not None:
         start = time.time()
+        if 'Lw' in net.meta and args.whitening in net.meta['Lw']:
+            
+            print('>> {}: Whitening is precomputed, loading it...'.format(args.whitening))
+            
+            if args.multiscale:
+                Lw = net.meta['Lw'][args.whitening]['ms']
+            else:
+                Lw = net.meta['Lw'][args.whitening]['ss']
+        else:
+            # Save whitening TODO
+            print('>> {}: Learning whitening...'.format(args.whitening))
 
-        print('>> {}: Learning whitening...'.format(args.whitening))
+            # loading db
+            db_root = os.path.join(get_data_root(), 'train', args.whitening)
+            ims_root = os.path.join(db_root, 'ims')
+            db_fn = os.path.join(db_root, '{}-whiten.pkl'.format(args.whitening))
+            with open(db_fn, 'rb') as f:
+                db = pickle.load(f)
+            images = [cid2filename(db['cids'][i], ims_root) for i in range(len(db['cids']))]
 
-        # loading db
-        db_root = os.path.join(get_data_root(), 'train', args.whitening)
-        ims_root = os.path.join(db_root, 'ims')
-        db_fn = os.path.join(db_root, '{}-whiten.pkl'.format(args.whitening))
-        with open(db_fn, 'rb') as f:
-            db = pickle.load(f)
-        images = [cid2filename(db['cids'][i], ims_root) for i in range(len(db['cids']))] # Just creating the imlists
-
-        # extract whitening vectors
-        print('>> {}: Extracting...'.format(args.whitening))
-        wvecs = extract_vectors(net, images, args.image_size, transform, ms=ms, msp=msp)
-        
-        # learning whitening 
-        print('>> {}: Learning...'.format(args.whitening))
-        wvecs = wvecs.numpy()
-        m, P = whitenlearn(wvecs, db['qidxs'], db['pidxs'])
-        Lw = {'m': m, 'P': P}
+            # extract whitening vectors
+            print('>> {}: Extracting...'.format(args.whitening))
+            wvecs = extract_vectors(net, images, args.image_size, transform, ms=ms, msp=msp)
+            
+            # learning whitening 
+            print('>> {}: Learning...'.format(args.whitening))
+            wvecs = wvecs.numpy()
+            m, P = whitenlearn(wvecs, db['qidxs'], db['pidxs'])
+            Lw = {'m': m, 'P': P}
 
         print('>> {}: elapsed time: {}'.format(args.whitening, htime(time.time()-start)))
     else:
@@ -149,7 +174,7 @@ def main():
     # evaluate on test datasets
     data_root = args.data_root
     datasets = datasets_names[args.dataset]
-
+    result_dict = {}
     for dataset in datasets: 
         start = time.time()
 
@@ -173,7 +198,7 @@ def main():
 
         # search, rank, and print
         scores = np.dot(vecs.T, qvecs)
-        ranks = np.argsort(-scores, axis=0)
+        ranks = np.argsort(-scores, axis=0)       
     
         if Lw is not None:
             # whiten the vectors
@@ -182,10 +207,17 @@ def main():
 
             # search, rank, and print
             scores = np.dot(vecs_lw.T, qvecs_lw)
-            ranks = np.argsort(-scores, axis=0)
-        
+            ranks = np.argsort(-scores, axis=0)        
         print('>> {}: elapsed time: {}'.format(dataset, htime(time.time()-start)))
+        
+        result_dict[dataset]= {'scores':scores, 'ranks':ranks}
 
+    # Save retrieval results
+    if not os.path.exists(result_dir):
+        os.makedirs(result_dir)
+    result_file = os.path.join(result_dir, '{}.npy'.format(args.dataset))
+    np.save(result_file, result_dict)
+    print('Save retrieval results to {}'.format(result_dir))
 
 if __name__ == '__main__':
     main()
