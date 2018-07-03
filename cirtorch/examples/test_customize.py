@@ -45,7 +45,7 @@ parser.add_argument('--dataset', '-ds', metavar='DATASETS', default='cambridge',
                    help='name of datasets (default: cambridge)')
 parser.add_argument('--train_txt', '-txt', metavar='TRAIN_TXT', default='dataset_train.txt', 
                     help='file to load train images')
-parser.add_argument('--query_txt', '-qtxt', metavar='QUERY_TXT', default='dataset_test.txt', choices=datasets_names,
+parser.add_argument('--query_txt', '-qtxt', metavar='QUERY_TXT', default='dataset_test.txt', 
                    help='file to load query images')
 parser.add_argument('--outfile', '-f', metavar='OUTFILE', default='cambridge.npy',
                    help='name of the output file where retrieval results are stored')
@@ -68,9 +68,9 @@ def get_imlist(data_root, dataset, ftxt):
     ims = []
     fpath = os.path.join(data_root, dataset, ftxt)
     with open(fpath) as f:
-        for i in range(3):
-            f.readline()
         for line in f:
+            if not line.startswith('seq') and not line.startswith('00'):
+                continue
             cur = line.split(' ')
             ims.append(cur[0])
     f.close()
@@ -225,7 +225,7 @@ def main():
     # Save retrieval results
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
-    result_file = os.path.join(result_dir, outfile)
+    result_file = os.path.join(result_dir, args.outfile)
     np.save(result_file, result_dict)
     print('Save retrieval results to {}'.format(result_file))
 
