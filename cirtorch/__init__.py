@@ -1,4 +1,4 @@
-from . import datasets, examples, layers, networks, utils
+from . import datasets, examples, layers, networks, utils, custom
 
 from .datasets import datahelpers, genericdataset, testdataset, traindataset
 from .layers import functional, loss, normalization, pooling
