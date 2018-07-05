@@ -15,14 +15,15 @@ def set_batchnorm_eval(m):
         # for p in m.parameters():
             # p.requires_grad = False
 
-def train(train_loader, model, criterion, optimizer, epoch, print_freq=40):
+def train(train_loader, model, criterion, optimizer, epoch, print_freq=40, log=None):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
 
     # create tuples for training
-    train_loader.dataset.create_epoch_tuples(model)
-
+    avg_dist = train_loader.dataset.create_epoch_tuples(model)
+    lprint('>>>>Train Average negative distance: {:.2f}'.format(avg_dist), log)
+    
     # switch to train mode
     model.train()
     model.apply(set_batchnorm_eval)
@@ -69,16 +70,17 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq=40):
                   'gpu memory usage {usage:.2f}%'.format(
                    epoch+1, i, len(train_loader), batch_time=batch_time,
                    data_time=data_time, loss=losses, usage=get_gpu_mem_usage()))
-    print('>>Finally training acc: Avg loss: {:.4f}, Avg time: {:.2f}'.format(losses.avg, batch_time.avg))
+    lprint('>>Epoch {} finally training acc: Avg loss: {:.4f}, Avg time: {:.2f}'.format(epoch+1, losses.avg, batch_time.avg), log)
     return losses.avg
 
-def validate(val_loader, model, criterion, epoch, print_freq=100):
+def validate(val_loader, model, criterion, epoch, print_freq=100, log=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
 
     # create tuples for validation
-    val_loader.dataset.create_epoch_tuples(model)
-
+    avg_dist = val_loader.dataset.create_epoch_tuples(model)
+    lprint('>>>>Val Average negative distance: {:.2f}'.format(avg_dist), log)
+    
     # switch to evaluate mode
     model.eval()
 
@@ -113,11 +115,11 @@ def validate(val_loader, model, criterion, epoch, print_freq=100):
                       'gpu memory usage {usage:.2f}%'.format(
                       epoch+1, i, len(val_loader), batch_time=batch_time,
                       loss=losses, usage=get_gpu_mem_usage()))
-    print('>>Finally validation acc: Avg loss: {:.4f}, Avg time: {:.2f}'.format(losses.avg, batch_time.avg))
+    lprint('>>Epoch {} finally validation acc: Avg loss: {:.4f}, Avg time: {:.2f}'.format(epoch+1, losses.avg, batch_time.avg), log)
     return losses.avg
 
 
-def test(net, data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='val', db_key='train'):
+def test(net, data_root, data_splits, gt_root, epoch, pass_thres=8, knn=10, query_key='val', db_key='train', log=None):
     print('>> Evaluating network on test datasets...')
 
     # for testing we use image size of max 1024
@@ -157,3 +159,5 @@ def test(net, data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='
     avg_percent, avg_sim = eval_retrieval(gt_root, rank_data, data_splits, pass_thres, 
                                           knn, query_key=query_key, db_key=db_key)
     print('>> Total elapsed time for evaluation: {:.2f}'.format(time.time()-start))
+    lprint('Test Avg percent: {}, avg similairty {}'.format(avg_percent, avg_sim), log)
+    

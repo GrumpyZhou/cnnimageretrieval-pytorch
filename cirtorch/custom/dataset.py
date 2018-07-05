@@ -7,7 +7,7 @@ import time
 
 from cirtorch.datasets.genericdataset import ImagesFromList
 from cirtorch.datasets.datahelpers import collate_tuples, default_loader, imresize
-from cirtorch.custom.util import get_gpu_mem_usage 
+from cirtorch.custom.util import get_gpu_mem_usage, lprint 
 
 class CustomizeTuplesDataset(data.Dataset):
     def __init__(self, name, mode, db_file, ims_root,
@@ -118,9 +118,11 @@ class CustomizeTuplesDataset(data.Dataset):
                 avg_ndist += torch.pow(qvecs - dbimvecs[:, pdnid] + 1e-6, 2).sum(dim=0).sqrt()
                 n_ndist += 1
             self.nidxs.append(snid + dnid)
-        print('>>>> Average negative distance: {:.2f}'.format(list((avg_ndist/n_ndist).cpu())[0]))
+        avg_dist = list((avg_ndist/n_ndist).cpu())[0]
+        #print('>>>> Average negative distance: {:.2f}'.format(avg_dist))
         print('Total search time {}s'.format(time.time() - t1))
         print('>>>> Dataset Preparation Done')
+        return avg_dist 
         
     def __getitem__(self, index):
         """

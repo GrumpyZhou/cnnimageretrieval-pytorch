@@ -11,7 +11,7 @@ from cirtorch.custom.dataset import CustomizeTuplesDataset
 from cirtorch.datasets.datahelpers import collate_tuples
 from cirtorch.networks.imageretrievalnet import init_network
 from cirtorch.layers.loss import ContrastiveLoss
-from cirtorch.custom.util import split_dataset, get_gpu_mem_usage, save_checkpoint 
+from cirtorch.custom.util import * 
 from cirtorch.custom.helper import test, train, validate
 
 PRETRAINED = {
@@ -107,26 +107,26 @@ def main():
     args = parser.parse_args()
 
     # create export dir if it doesnt exist
-    directory = "_{}".format(args.arch)
-    directory += "_{}".format(args.pool)
+    conftxt = 'Model {}-{}'.format(args.arch, args.pool )
     if args.whitening:
-        directory += "_whiten"
+        conftxt += '-whiten'
     if args.pretrained in PRETRAINED:
-        directory += "_pretrained"
+        conftxt += " Pretrained: {} ".format(args.pretrained)
     elif args.pretrained == 'imagenet':
-        directory += "_imagenet"
+        conftxt += " Pretrained: imagenet"
     else:
-        directory += "_nopretrain"        
-    #directory += "_{}_m{:.2f}".format(args.loss, args.loss_margin)
-    directory += "_{}_lr{:.1e}_wd{:.1e}".format(args.optimizer, args.lr, args.weight_decay)
-    directory += "_snn{}_dnn{}".format(args.sneg_num, args.dneg_num)
-    #directory += "_qsize{}".format(args.query_size)
-    #directory += "_bsize{}_imsize{}".format(args.batch_size, args.image_size)
+        conftxt += " No pretrain "        
+    conftxt += " Loss: {} margin: {:.2f}".format(args.loss, args.loss_margin)
+    conftxt += " Opt: {} lr{:.1e} wd{:.1e }".format(args.optimizer, args.lr, args.weight_decay)
+    conftxt += " snn{} dnn{}".format(args.sneg_num, args.dneg_num)
+    conftxt += " qsize{}".format(args.query_size)
+    conftxt += " bsize{} imsize{}".format(args.batch_size, args.image_size)
 
-    args.directory = os.path.join(args.directory, directory)
     print(">> Creating directory if it does not exist:\n>> '{}'".format(args.directory))
     if not os.path.exists(args.directory):
         os.makedirs(args.directory)
+    log = open(os.path.join(args.directory, 'log.txt'), 'w')
+    lprint('>>>>Training configuration:\n {}'.format(conftxt), log)
 
     # set cuda visible device
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
@@ -240,7 +240,7 @@ def main():
     # evaluate the network before starting
     gt_root = os.path.join(args.data_root, 'sfm_relative_pose_pairs')
     data_splits = split_dataset(args.data_root, test_datasets, val_step=6, seed=0) 
-    #test(model, args.data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='val', db_key='train')
+    test(model, args.data_root, data_splits, gt_root, epoch=0, pass_thres=8, knn=10, query_key='val', db_key='train', log=log)
 
     for epoch in range(start_epoch, args.epochs):
 
@@ -253,26 +253,29 @@ def main():
         scheduler.step()
 
         # train for one epoch on train set
-        loss = train(train_loader, model, criterion, optimizer, epoch, print_freq=40)
+        loss = train(train_loader, model, criterion, optimizer, epoch, print_freq=40, log=log)
 
         # evaluate on validation set
         if args.val and (epoch + 1) % 5 == 0:
-            loss = validate(val_loader, model, criterion, epoch, print_freq=100)
+            loss = validate(val_loader, model, criterion, epoch, print_freq=100, log=log)
 
-        # evaluate on test datasets
-        test(model, args.data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='val', db_key='train')
+            # evaluate on test datasets
+            test(model, args.data_root, data_splits, gt_root, epoch, pass_thres=8, knn=10, query_key='val', db_key='train', log=log)
 
-        # remember best loss and save checkpoint
-        is_best = loss < min_loss
-        min_loss = min(loss, min_loss)
+            # remember best loss and save checkpoint
+            is_best = loss < min_loss
+            min_loss = min(loss, min_loss)
 
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'meta': model.meta,
-            'state_dict': model.state_dict(),
-            'min_loss': min_loss,
-            'optimizer' : optimizer.state_dict(),
-        }, is_best, args.directory)
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'meta': model.meta,
+                'state_dict': model.state_dict(),
+                'min_loss': min_loss,
+                'optimizer' : optimizer.state_dict(),
+            }, is_best, args.directory)
+
+    print('Training Finished')
+    log.close()
 
 if __name__ == '__main__':
     main()

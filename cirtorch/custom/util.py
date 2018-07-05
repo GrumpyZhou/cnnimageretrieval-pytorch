@@ -6,6 +6,11 @@ import torch
 import shutil
 from cirtorch.utils.whiten import whitenlearn, whitenapply
 
+def lprint(ms, log=None):
+    if log is not None:
+        log.write('{}\n'.format(ms))
+    print(ms)
+    
 def get_gpu_mem_usage():
     device = torch.cuda.current_device()
     return torch.cuda.memory_allocated(device) / torch.cuda.max_memory_allocated(device) * 100.0
