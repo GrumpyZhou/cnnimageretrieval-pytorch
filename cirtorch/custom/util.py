@@ -2,8 +2,13 @@ import os
 import random
 import time
 import numpy as np
-
+import torch
+import shutil
 from cirtorch.utils.whiten import whitenlearn, whitenapply
+
+def get_gpu_mem_usage():
+    device = torch.cuda.current_device()
+    return torch.cuda.memory_allocated(device) / torch.cuda.max_memory_allocated(device) * 100.0
 
 def save_checkpoint(state, is_best, directory):
     filename = os.path.join(directory, 'model_epoch%d.pth.tar' % state['epoch'])
