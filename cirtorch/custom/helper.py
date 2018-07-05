@@ -15,7 +15,7 @@ def set_batchnorm_eval(m):
         # for p in m.parameters():
             # p.requires_grad = False
 
-def train(train_loader, model, criterion, optimizer, epoch, print_freq=10):
+def train(train_loader, model, criterion, optimizer, epoch, print_freq=40):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -50,7 +50,7 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq=10):
             # each backward pass gradients will be accumulated
             target_var = torch.autograd.Variable(target[q].cuda())
             loss = criterion(output, target_var)
-            losses.update(loss.data[0])
+            losses.update(loss.item())
             loss.backward()
 
         # do one step for multiple batches
@@ -65,13 +65,14 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq=10):
             print('>> Train: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})'.format(
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                  'gpu memory usage {usage:.2f}%'.format(
                    epoch+1, i, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses))
-
+                   data_time=data_time, loss=losses, usage=get_gpu_mem_usage()))
+    print('>>Finally training acc: Avg loss: {:.4f}, Avg time: {:.2f}'.format(losses.avg, batch_time.avg))
     return losses.avg
 
-def validate(val_loader, model, criterion, epoch, print_freq=10):
+def validate(val_loader, model, criterion, epoch, print_freq=100):
     batch_time = AverageMeter()
     losses = AverageMeter()
 
@@ -82,36 +83,37 @@ def validate(val_loader, model, criterion, epoch, print_freq=10):
     model.eval()
 
     end = time.time()
-    for i, (input, target) in enumerate(val_loader):
+    with torch.no_grad():    
+        for i, (input, target) in enumerate(val_loader):
+            nq = len(input) # number of training tuples
+            ni = len(input[0]) # number of images per tuple
+            output = torch.Tensor(model.meta['outputdim'], nq*ni).cuda()
 
-        nq = len(input) # number of training tuples
-        ni = len(input[0]) # number of images per tuple
-        output = torch.autograd.Variable(torch.Tensor(model.meta['outputdim'], nq*ni).cuda(), volatile=True)
+            for q in range(nq):
+                for imi in range(ni):
+                    # target = target.cuda(async=True)
+                    input_var = input[q][imi].cuda()
 
-        for q in range(nq):
-            for imi in range(ni):
-                # target = target.cuda(async=True)
-                input_var = torch.autograd.Variable(input[q][imi].cuda())
+                    # compute output
+                    output[:, q*ni + imi] = model(input_var).squeeze()
 
-                # compute output
-                output[:, q*ni + imi] = model(input_var).squeeze()
+            target_var = torch.cat(target).cuda()
+            loss = criterion(output, target_var)
 
-        target_var = torch.autograd.Variable(torch.cat(target).cuda())
-        loss = criterion(output, target_var)
+            # record loss
+            losses.update(loss.item()/nq, nq)
 
-        # record loss
-        losses.update(loss.data[0]/nq, nq)
+            # measure elapsed time
+            batch_time.update(time.time() - end)
 
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        if i % print_freq == 0:
-            print('>> Val: [{0}][{1}/{2}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})'.format(
-                   epoch+1, i, len(val_loader), batch_time=batch_time, loss=losses))
-
+            if i % print_freq == 0:
+                print('>> Val: [{0}][{1}/{2}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'gpu memory usage {usage:.2f}%'.format(
+                      epoch+1, i, len(val_loader), batch_time=batch_time,
+                      loss=losses, usage=get_gpu_mem_usage()))
+    print('>>Finally validation acc: Avg loss: {:.4f}, Avg time: {:.2f}'.format(losses.avg, batch_time.avg))
     return losses.avg
 
 
@@ -141,7 +143,7 @@ def test(net, data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='
         qims = data_splits[dataset][query_key]
         dbvecs = extract_vectors(net, dbims, image_size, transform, root=os.path.join(data_root, dataset))
         qvecs = extract_vectors(net, qims, image_size, transform, root=os.path.join(data_root, dataset))
-        print('>> Extracted database images: {} query images: {} time: {:.2f}'.format(dbvecs.size(), qvecs.size(), time.time()-start))
+        print('>> Extracted database images: {} query images: {} time: {:.2f} gpu usage: {:.2f}%'.format(dbvecs.size(), qvecs.size(), time.time()-start, get_gpu_mem_usage()))
 
         # Retrieval
         dbvecs = dbvecs.numpy()
