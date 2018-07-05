@@ -7,6 +7,7 @@ import time
 
 from cirtorch.datasets.genericdataset import ImagesFromList
 from cirtorch.datasets.datahelpers import collate_tuples, default_loader, imresize
+from cirtorch.custom.util import get_gpu_mem_usage 
 
 class CustomizeTuplesDataset(data.Dataset):
     def __init__(self, name, mode, db_file, ims_root,
@@ -52,19 +53,17 @@ class CustomizeTuplesDataset(data.Dataset):
         net.cuda()
         net.eval()
         t1 = time.time()  
-        print('>> Extracting descriptors for all query images...')
         loader = torch.utils.data.DataLoader(
             ImagesFromList(root='', images=self.qims, imsize=self.imsize, transform=self.transform),
             batch_size=1, shuffle=False, num_workers=8, pin_memory=True
         )
         qimvecs = torch.Tensor(net.meta['outputdim'], len(self.qims)).cuda()
         for i, input in enumerate(loader):
-            print('\r>>>> {}/{} done...'.format(i+1, len(self.qims)), end='')
+            print('\r>>>>Extracting desc of query ims: {}/{} done...'.format(i+1, len(self.qims)), end='')
             qimvecs[:, i] = net(Variable(input.cuda())).data.squeeze()
-        print('Total time from extracting query image descriptors: {}s, scriptor size {}'.format(time.time()-t1, qimvecs.size()))
+        #print('Total time from extracting query image descriptors: {}s, scriptor size {} gpu memory usage {:.2f}%'.format(time.time()-t1, qimvecs.size(), get_gpu_mem_usage()))
 
         # Extract descriptors for db images
-        print('>> Extracting descriptors for all db images...')
         if self.qkey == self.dbkey:  # Query images are the same as db images
             dbimvecs = qimvecs
         else:
@@ -75,12 +74,12 @@ class CustomizeTuplesDataset(data.Dataset):
             )
             dbimvecs = torch.Tensor(net.meta['outputdim'], len(self.dbims)).cuda()
             for i, input in enumerate(loader):
-                print('\r>>>> {}/{} done...'.format(i+1, len(self.dbims)), end='')
+                print('\r>>>>Extracting desc of db ims {}/{} done...'.format(i+1, len(self.dbims)), end='')
                 dbimvecs[:, i] = net(Variable(input.cuda())).data.squeeze()
-            print('Total time from extracting db image descriptors: {}s, scriptor size {}'.format(time.time()-t1, dbimvecs.size()))
+            #print('Total time from extracting db image descriptors: {}s, scriptor size {} gpu memory usage {:.2f}%'.format(time.time()-t1, dbimvecs.size(), get_gpu_mem_usage()))
 
-        
         # Search for negative pairs
+        print('Searching negative pairs: snn {} dnn {}'.format(self.snum, self.dnum))
         t1 = time.time()  
         self.nidxs = []
         avg_ndist = torch.Tensor([0]).cuda()

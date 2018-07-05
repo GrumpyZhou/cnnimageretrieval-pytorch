@@ -11,7 +11,7 @@ from cirtorch.custom.dataset import CustomizeTuplesDataset
 from cirtorch.datasets.datahelpers import collate_tuples
 from cirtorch.networks.imageretrievalnet import init_network
 from cirtorch.layers.loss import ContrastiveLoss
-from cirtorch.custom.util import split_dataset
+from cirtorch.custom.util import split_dataset, get_gpu_mem_usage, save_checkpoint 
 from cirtorch.custom.helper import test, train, validate
 
 PRETRAINED = {
@@ -20,8 +20,8 @@ PRETRAINED = {
 }
 
 training_dataset_names = ['7Scenes']
+#test_datasets = ['heads', 'fire', 'stairs'] 
 test_datasets = ['chess', 'heads', 'fire', 'office', 'pumpkin', 'redkitchen', 'stairs']
-test_datasets = ['heads']
 test_whiten_names = ['retrieval-SfM-30k', 'retrieval-SfM-120k']
 
 model_names = sorted(name for name in models.__dict__
@@ -117,10 +117,11 @@ def main():
         directory += "_imagenet"
     else:
         directory += "_nopretrain"        
-    directory += "_{}_m{:.2f}".format(args.loss, args.loss_margin)
+    #directory += "_{}_m{:.2f}".format(args.loss, args.loss_margin)
     directory += "_{}_lr{:.1e}_wd{:.1e}".format(args.optimizer, args.lr, args.weight_decay)
-    directory += "_snn{}_dnn{}_qsize{}".format(args.sneg_num, args.dneg_num , args.query_size)
-    directory += "_bsize{}_imsize{}".format(args.batch_size, args.image_size)
+    directory += "_snn{}_dnn{}".format(args.sneg_num, args.dneg_num)
+    #directory += "_qsize{}".format(args.query_size)
+    #directory += "_bsize{}_imsize{}".format(args.batch_size, args.image_size)
 
     args.directory = os.path.join(args.directory, directory)
     print(">> Creating directory if it does not exist:\n>> '{}'".format(args.directory))
@@ -129,7 +130,7 @@ def main():
 
     # set cuda visible device
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
-    
+
     # set random seeds (maybe pass as argument)
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
@@ -239,7 +240,7 @@ def main():
     # evaluate the network before starting
     gt_root = os.path.join(args.data_root, 'sfm_relative_pose_pairs')
     data_splits = split_dataset(args.data_root, test_datasets, val_step=6, seed=0) 
-    test(model, args.data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='val', db_key='train')
+    #test(model, args.data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='val', db_key='train')
 
     for epoch in range(start_epoch, args.epochs):
 
@@ -252,11 +253,11 @@ def main():
         scheduler.step()
 
         # train for one epoch on train set
-        loss = train(train_loader, model, criterion, optimizer, epoch, print_freq=20)
+        loss = train(train_loader, model, criterion, optimizer, epoch, print_freq=40)
 
         # evaluate on validation set
-        if args.val:
-            loss = validate(val_loader, model, criterion, epoch, print_freq=10)
+        if args.val and (epoch + 1) % 5 == 0:
+            loss = validate(val_loader, model, criterion, epoch, print_freq=100)
 
         # evaluate on test datasets
         test(model, args.data_root, data_splits, gt_root, pass_thres=8, knn=10, query_key='val', db_key='train')
