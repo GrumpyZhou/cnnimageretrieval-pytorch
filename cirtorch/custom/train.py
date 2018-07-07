@@ -117,7 +117,7 @@ def main():
     else:
         conftxt += " No pretrain "        
     conftxt += " Loss: {} margin: {:.2f}".format(args.loss, args.loss_margin)
-    conftxt += " Opt: {} lr{:.1e} wd{:.1e }".format(args.optimizer, args.lr, args.weight_decay)
+    conftxt += " Opt: {} lr{:.1e} wd{:.1e}".format(args.optimizer, args.lr, args.weight_decay)
     conftxt += " snn{} dnn{}".format(args.sneg_num, args.dneg_num)
     conftxt += " qsize{}".format(args.query_size)
     conftxt += " bsize{} imsize{}".format(args.batch_size, args.image_size)
